@@ -1,0 +1,72 @@
+services:
+  # FastAPI backend
+  - type: web
+    name: xenocrm-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt"
+    preDeployCommand: "alembic upgrade head"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CHANNEL_STUB_URL
+        fromService:
+          type: web
+          name: xenocrm-channel-stub
+          property: host
+      - key: CRM_BASE_URL
+        value: https://xenocrm-backend.onrender.com
+      - key: CORS_ORIGINS
+        value: https://xenocrm-frontend.onrender.com
+
+  # Channel stub (simulated delivery + receipt callbacks)
+  - type: web
+    name: xenocrm-channel-stub
+    runtime: python
+    rootDir: channel-stub
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+
+  # Celery worker (background campaign dispatch)
+  - type: worker
+    name: xenocrm-celery
+    runtime: python
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A app.tasks.celery_app worker --loglevel=info --pool=solo"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CHANNEL_STUB_URL
+        fromService:
+          type: web
+          name: xenocrm-channel-stub
+          property: host
+      - key: CRM_BASE_URL
+        value: https://xenocrm-backend.onrender.com
+
+  # React frontend (static SPA)
+  - type: web
+    name: xenocrm-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://xenocrm-backend.onrender.com

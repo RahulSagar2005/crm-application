@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: xenocrm
+      POSTGRES_PASSWORD: xenocrm
+      POSTGRES_DB: xenocrm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xenocrm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://xenocrm:xenocrm@postgres:5432/xenocrm
+      REDIS_URL: redis://redis:6379
+      CHANNEL_STUB_URL: http://channel-stub:8001
+      CRM_BASE_URL: http://backend:8000
+      CORS_ORIGINS: http://localhost:5173
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://xenocrm:xenocrm@postgres:5432/xenocrm
+      REDIS_URL: redis://redis:6379
+      CHANNEL_STUB_URL: http://channel-stub:8001
+      CRM_BASE_URL: http://backend:8000
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+
+  channel-stub:
+    build:
+      context: ./channel-stub
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: 8001
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
+
+volumes:
+  postgres_data:

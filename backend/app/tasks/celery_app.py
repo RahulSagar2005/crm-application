@@ -23,11 +23,20 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-engine = create_async_engine(settings.database_url, echo=False)
-sync_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+def _make_session_factory():
+    # Lazy engine + session factory. Must be created inside the task body
+    # because the worker is prefork: a global engine would be created in
+    # the main process and inherited by forked workers, which then try to
+    # use an asyncpg connection attached to a loop that doesn't exist in
+    # the worker process. The error surfaces as:
+    #   "got Future ... attached to a different loop"
+    engine = create_async_engine(settings.database_url, echo=False)
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def _send_campaign_async(campaign_id: int):
+    sync_session_factory = _make_session_factory()
     async with sync_session_factory() as db:
         campaign_result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
         campaign = campaign_result.scalar_one_or_none()

@@ -80,43 +80,60 @@ Open **http://localhost:5173**
 
 ## Deployment
 
-This project is configured for **Railway** via a single multi-service `railway.json`
-at the repo root. The file declares four services that Railway will create
-together when you link the repo.
+This project is configured for **Railway** with one `railway.json` per
+service, each placed inside the service's own directory. The `builder`
+is explicitly set to `DOCKERFILE` so Railway uses the existing
+Dockerfiles (it would otherwise fall back to Railpack, which can't
+build this monorepo because it scans only the repo root for language
+markers).
 
 ### One-time setup
 
 1. Sign in at [railway.app](https://railway.app) with your GitHub account.
-2. **New Project → Deploy from GitHub repo** → pick `crm-application`.
-3. Railway reads `railway.json` and creates four services:
-   `backend`, `celery-worker`, `channel-stub`, `frontend`.
+2. **New Project → Empty Project** (do NOT pick "Deploy from GitHub"
+   — that auto-detects one service; we need four).
+3. From inside the project, create the four services. For each one
+   click **+ New → GitHub Repo** and pick `crm-application`. Railway
+   will create a service whose name is the repo name — that's fine,
+   we'll rename below.
+4. After each service is created, open it and configure:
+   - **Settings → Service Name** → rename to one of: `backend`,
+     `celery-worker`, `channel-stub`, `frontend`.
+   - **Settings → Root Directory** → set to the matching subdirectory
+     (`backend`, `backend`, `channel-stub`, `frontend` respectively).
+     The Root Directory sets the build context for the Dockerfile.
+   - **Settings → Config File Path** → for the worker only, set this
+     to `/backend/railway.worker.json`. The other three use the
+     default `railway.json` in their Root Directory.
+
+   The point of the worker having its own config: the `startCommand`
+   differs (`celery ...` vs `uvicorn ...`), so it needs a different
+   deploy block.
 
 ### Add databases (Postgres + Redis)
 
-4. In the project, click **+ New → Database → PostgreSQL**. After it
-   provisions, right-click it → **Variables** and copy the `DATABASE_URL`.
-5. Click **+ New → Database → Redis**. Copy `REDIS_URL` and `REDIS_PRIVATE_URL`.
+5. In the project, click **+ New → Database → PostgreSQL**. After it
+   provisions, right-click it → **Variables** and copy `DATABASE_URL`.
+6. Click **+ New → Database → Redis**. Copy `REDIS_URL`.
 
-> The Postgres plugin exposes `DATABASE_URL` (sync, `postgresql://…`); the
-> backend needs the async driver, so for the backend service set
+> Railway's Postgres plugin exposes `DATABASE_URL` as
+> `postgresql://…` (sync, psycopg). The backend needs the async
+> driver, so for the `backend` service set
 > `DATABASE_URL=postgresql+asyncpg://…` (same host/user/pass/db, just
-> the scheme prefix and driver).
+> the scheme prefix).
 
 ### Wire env vars on the four services
 
 For **`backend`**:
 
 ```
-DATABASE_URL=postgresql+asyncpg://<from step 4>
-REDIS_URL=redis://<from step 5>
+DATABASE_URL=postgresql+asyncpg://<from step 5>
+REDIS_URL=redis://<from step 6>
 GROQ_API_KEY=<your key>
 CORS_ORIGINS=https://<frontend-domain>.up.railway.app
 ```
 
-The backend's other vars (`CHANNEL_STUB_URL`, `CRM_BASE_URL`) are auto-set
-by the steps below once those services have public URLs.
-
-For **`channel-stub`**: none required.
+For **`channel-stub`**: none required (Railway injects `PORT`).
 
 For **`celery-worker`**: same vars as `backend`.
 
@@ -126,28 +143,28 @@ For **`frontend`**:
 VITE_API_URL=https://<backend-domain>.up.railway.app
 ```
 
-> `VITE_API_URL` is a **build-time** variable. If you change it later you
-> must trigger a redeploy of the frontend service so the new value gets
-> baked into the JS bundle.
+> `VITE_API_URL` is a **build-time** variable — it gets baked into the
+> JS bundle by Vite. If you change it later you must trigger a redeploy
+> of the frontend so the new value gets baked in.
 
 ### Cross-service URLs (the order matters)
 
-6. Deploy everything once. After `channel-stub` and `backend` get public
-   URLs, go to **`channel-stub` → Variables** and add `PORT=8001` (Railway
-   default is fine; the stub's startCommand reads `$PORT`).
-7. Copy the **`channel-stub`** public URL. On the **`backend`** service,
-   set `CHANNEL_STUB_URL=<that-url>` and `CRM_BASE_URL=<backend-public-url>`.
-8. Copy the **`backend`** public URL. On the **`frontend`** service, set
+7. Trigger a first deploy on every service so Railway hands out public
+   URLs.
+8. Copy the **`channel-stub`** public URL. On the **`backend`** service,
+   set `CHANNEL_STUB_URL=<that-url>` and `CRM_BASE_URL=<backend-public-url>`,
+   then redeploy backend.
+9. Copy the **`backend`** public URL. On the **`frontend`** service, set
    `VITE_API_URL=<that-url>` and **redeploy** the frontend so the new
    value is baked into the bundle.
-9. Copy the **`frontend`** public URL. Back on **`backend`**, update
-   `CORS_ORIGINS` to include it, then redeploy the backend.
+10. Copy the **`frontend`** public URL. Back on **`backend`**, update
+    `CORS_ORIGINS` to include it, then redeploy the backend.
 
 ### Domain (optional)
 
-10. On the `frontend` service → **Settings → Networking → Generate Domain**
-    or attach a custom one. The included nginx config already serves the
-    Vite build with an SPA rewrite (`try_files` → `index.html`).
+11. On the `frontend` service → **Settings → Networking → Generate Domain**
+    or attach a custom one. The included nginx config already serves
+    the Vite build with an SPA rewrite (`try_files` → `index.html`).
 
 ### Local reminder
 

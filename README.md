@@ -80,50 +80,79 @@ Open **http://localhost:5173**
 
 ## Deployment
 
-### NEON DATABASE SETUP
+This project is configured for **Railway** via a single multi-service `railway.json`
+at the repo root. The file declares four services that Railway will create
+together when you link the repo.
 
-1. Go to [neon.tech](https://neon.tech) → New Project → copy `DATABASE_URL`
-2. Format: `postgresql+asyncpg://user:pass@host/dbname`
-3. Run: `cd backend && alembic upgrade head`
+### One-time setup
 
-### UPSTASH REDIS SETUP
+1. Sign in at [railway.app](https://railway.app) with your GitHub account.
+2. **New Project → Deploy from GitHub repo** → pick `crm-application`.
+3. Railway reads `railway.json` and creates four services:
+   `backend`, `celery-worker`, `channel-stub`, `frontend`.
 
-1. Go to [upstash.com](https://upstash.com) → Create Database → Redis
-2. Copy `REDIS_URL` (starts with `rediss://`)
+### Add databases (Postgres + Redis)
 
-### RENDER DEPLOYMENT (Backend)
+4. In the project, click **+ New → Database → PostgreSQL**. After it
+   provisions, right-click it → **Variables** and copy the `DATABASE_URL`.
+5. Click **+ New → Database → Redis**. Copy `REDIS_URL` and `REDIS_PRIVATE_URL`.
 
-1. New Web Service → Connect GitHub repo
-2. Root Directory: `backend`
-3. Build Command: `pip install -r requirements.txt`
-4. Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. Add all env vars from `.env.example`
-6. Note the public URL (e.g. `https://xeno-crm.onrender.com`)
+> The Postgres plugin exposes `DATABASE_URL` (sync, `postgresql://…`); the
+> backend needs the async driver, so for the backend service set
+> `DATABASE_URL=postgresql+asyncpg://…` (same host/user/pass/db, just
+> the scheme prefix and driver).
 
-### RENDER DEPLOYMENT (Celery Worker)
+### Wire env vars on the four services
 
-1. New Background Worker → same repo
-2. Root Directory: `backend`
-3. Build Command: `pip install -r requirements.txt`
-4. Start Command: `celery -A app.tasks.celery_app worker --loglevel=info`
-5. Same env vars as backend
+For **`backend`**:
 
-### RENDER DEPLOYMENT (Channel Stub)
+```
+DATABASE_URL=postgresql+asyncpg://<from step 4>
+REDIS_URL=redis://<from step 5>
+GROQ_API_KEY=<your key>
+CORS_ORIGINS=https://<frontend-domain>.up.railway.app
+```
 
-1. New Web Service → same repo
-2. Root Directory: `channel-stub`
-3. Build Command: `pip install -r requirements.txt`
-4. Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-5. Note the URL → set as `CHANNEL_STUB_URL` in backend env vars
+The backend's other vars (`CHANNEL_STUB_URL`, `CRM_BASE_URL`) are auto-set
+by the steps below once those services have public URLs.
 
-### VERCEL DEPLOYMENT (Frontend)
+For **`channel-stub`**: none required.
 
-1. Import GitHub repo in [Vercel](https://vercel.com)
-2. Root Directory: `frontend`
-3. Build Command: `npm run build`
-4. Output Directory: `dist`
-5. Add env var: `VITE_API_URL=https://your-backend.onrender.com`
-6. Deploy
+For **`celery-worker`**: same vars as `backend`.
+
+For **`frontend`**:
+
+```
+VITE_API_URL=https://<backend-domain>.up.railway.app
+```
+
+> `VITE_API_URL` is a **build-time** variable. If you change it later you
+> must trigger a redeploy of the frontend service so the new value gets
+> baked into the JS bundle.
+
+### Cross-service URLs (the order matters)
+
+6. Deploy everything once. After `channel-stub` and `backend` get public
+   URLs, go to **`channel-stub` → Variables** and add `PORT=8001` (Railway
+   default is fine; the stub's startCommand reads `$PORT`).
+7. Copy the **`channel-stub`** public URL. On the **`backend`** service,
+   set `CHANNEL_STUB_URL=<that-url>` and `CRM_BASE_URL=<backend-public-url>`.
+8. Copy the **`backend`** public URL. On the **`frontend`** service, set
+   `VITE_API_URL=<that-url>` and **redeploy** the frontend so the new
+   value is baked into the bundle.
+9. Copy the **`frontend`** public URL. Back on **`backend`**, update
+   `CORS_ORIGINS` to include it, then redeploy the backend.
+
+### Domain (optional)
+
+10. On the `frontend` service → **Settings → Networking → Generate Domain**
+    or attach a custom one. The included nginx config already serves the
+    Vite build with an SPA rewrite (`try_files` → `index.html`).
+
+### Local reminder
+
+`docker compose up` still works for local dev — nothing in it changed.
+Only the deploy target moved from Render to Railway.
 
 ### SEED DATA
 

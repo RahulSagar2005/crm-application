@@ -5,7 +5,7 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT} & PID1=$!; celery -A app.tasks.celery_app worker --loglevel=info & PID2=$!; wait $PID1 $PID2'",
+    "startCommand": "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT} & PID1=$!; celery -A app.tasks.celery_app worker --loglevel=info --pool=solo --concurrency=1 & PID2=$!; wait $PID1 $PID2'",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
